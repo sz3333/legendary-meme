@@ -152,5 +152,83 @@ class FurryCacheMod(loader.Module):
         res = cursor.fetchone()
         return res[0] if res else 0
 
-    # Остальной код твоего FurryCache (furrloadcmd, furrcmd, furrsetcmd, furrinfocmd, furrclearcmd)
-    # можно вставить сюда без изменений, чтобы всё в одном модуле
+    def _get_channels(self):
+        channels = self.config["channels"]
+        if isinstance(channels, str):
+            channels = [c.strip() for c in channels.split(",")]
+        fallback_channels = ["gexfor20","@gexfor20","furryart","@furryart","furry_nsfw","@furry_nsfw"]
+        return list(dict.fromkeys(channels + fallback_channels))
+
+    async def _test_channel_access(self, channel_name):
+        try:
+            channel = await self.client.get_entity(channel_name)
+            messages = await self.client.get_messages(channel, limit=1)
+            return channel, True
+        except Exception as e:
+            logger.warning(f"Канал {channel_name} недоступен: {e}")
+            return None, False
+
+    async def _find_accessible_channels(self):
+        channels = self._get_channels()
+        accessible = []
+        for channel_name in channels:
+            channel, is_accessible = await self._test_channel_access(channel_name)
+            if is_accessible:
+                accessible.append((channel_name, channel))
+                logger.info(f"✅ Канал доступен: {channel_name}")
+            await asyncio.sleep(0.5)
+        return accessible
+
+    async def _load_from_channel(self, channel_name, channel, max_messages):
+        media_loaded = 0
+        offset_id = 0
+        limit = 100
+        try:
+            while media_loaded < max_messages:
+                messages = await self.client.get_messages(channel, limit=min(limit, max_messages - media_loaded), offset_id=offset_id)
+                if not messages:
+                    break
+                cursor = self._conn.cursor()
+                for msg in messages:
+                    if msg.media:
+                        try:
+                            cursor.execute("INSERT OR IGNORE INTO media (chat_id, message_id, channel_name) VALUES (?, ?, ?)",
+                                           (msg.chat_id, msg.id, channel_name))
+                            media_loaded += 1
+                        except Exception as e:
+                            logger.error(f"Ошибка при сохранении медиа: {e}")
+                self._conn.commit()
+                if messages:
+                    offset_id = messages[-1].id
+                await asyncio.sleep(0.2)
+        except Exception as e:
+            logger.error(f"Ошибка при загрузке из {channel_name}: {e}")
+        return media_loaded
+
+    async def furrloadcmd(self, message: Message):
+        await utils.answer(message, "🔍 Ищу доступные каналы...")
+        accessible_channels = await self._find_accessible_channels()
+        if not accessible_channels:
+            await utils.answer(message, self.strings("channel_error"))
+            return
+        await utils.answer(message, f"📥 Загружаю из {len(accessible_channels)} каналов...")
+        total_loaded = 0
+        max_per_channel = self.config["max_messages"] // len(accessible_channels)
+        for channel_name, channel in accessible_channels:
+            loaded = await self._load_from_channel(channel_name, channel, max_per_channel)
+            total_loaded += loaded
+        await utils.answer(message, f"✅ Загружено {total_loaded} медиа файлов!")
+
+    async def furrcmd(self, message: Message):
+        try:
+            await utils.answer(message, self.strings("fetching"))
+            cursor = self._conn.cursor()
+            try:
+                cursor.execute("SELECT chat_id, message_id, channel_name FROM media ORDER BY RANDOM() LIMIT 1")
+                row = cursor.fetchone()
+                if row:
+                    chat_id, msg_id, channel_name = row
+                else:
+                    await utils.answer(message, self.strings("no_cache"))
+                    return
+            except sqlite3.Operational
