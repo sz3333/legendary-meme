@@ -1,0 +1,105 @@
+from telethon import types
+from telethon.tl.functions.messages import SendReactionRequest
+from telethon.tl.types import ReactionCustomEmoji, ReactionEmoji
+from .. import loader, utils
+import logging
+
+logger = logging.getLogger(__name__)
+__version__ = (1, 3, 0)
+
+
+@loader.tds
+class MeowReactMod(loader.Module):
+    strings = {
+        "name": "MeowReact",
+        "enabled": "✅ Реакции включены в этом чате",
+        "disabled": "🚫 Реакции отключены в этом чате",
+        "reaction_set": "✅ Установлена реакция: {}",
+        "premium_set": "✅ Установлена Premium реакция по ID: {}",
+        "trigger_set": "✅ Установлено триггерное слово: {}",
+        "no_reaction": "⚠️ Укажите эмодзи или ID премиум-эмодзи"
+    }
+
+    def __init__(self):
+        self.config = loader.ModuleConfig(
+            "current_reaction",
+            "😸",
+            "Текущая реакция (эмодзи или ID премиум-эмодзи)",
+            
+            "is_premium",
+            False,
+            "Используется ли премиум-эмодзи",
+            
+            "trigger_word",
+            "",
+            "Слово-триггер (оставьте пустым для всех сообщений)"
+        )
+
+    async def client_ready(self, client, db):
+        self._client = client
+        self._db = db
+        self.active_chats = self.get("active_chats", {})
+
+    def save_active_chats(self):
+        self.set("active_chats", self.active_chats)
+
+    @loader.command(ru_doc="Включить/выключить реакции в чате")
+    async def toggle(self, message):
+        chat_id = str(message.chat_id)
+        if chat_id in self.active_chats:
+            del self.active_chats[chat_id]
+            status = False
+        else:
+            self.active_chats[chat_id] = True
+            status = True
+        self.save_active_chats()
+        await utils.answer(message, self.strings["enabled"] if status else self.strings["disabled"])
+
+    @loader.command(ru_doc="Установить реакцию (эмодзи или ID премиум-эмодзи)")
+    async def setr(self, message):
+        args = utils.get_args_raw(message)
+        if not args:
+            await utils.answer(message, self.strings["no_reaction"])
+            return
+        is_premium = args.isdigit()
+        self.config["current_reaction"] = args
+        self.config["is_premium"] = is_premium
+        await utils.answer(
+            message,
+            self.strings["premium_set"].format(args) if is_premium else self.strings["reaction_set"].format(args)
+        )
+
+    @loader.command(ru_doc="Установить триггерное слово")
+    async def settrigger(self, message):
+        args = utils.get_args_raw(message)
+        self.config["trigger_word"] = args
+        await utils.answer(message, self.strings["trigger_set"].format(args or "нет"))
+
+    @loader.watcher()
+    async def watcher(self, message):
+        if not isinstance(message, types.Message):
+            return
+        chat_id = str(message.chat_id)
+        if chat_id not in self.active_chats:
+            return
+
+        text = getattr(message, "text", "") or ""
+        trigger = self.config.get("trigger_word", "").lower()
+        if trigger and trigger not in text.lower():
+            return
+
+        try:
+            if self.config["is_premium"]:
+                doc_id = int(self.config["current_reaction"])
+                reaction = ReactionCustomEmoji(document_id=doc_id)
+            else:
+                # Для обычных эмодзи используем ReactionEmoji
+                reaction = ReactionEmoji(emoticon=self.config["current_reaction"])
+            
+            await self._client(SendReactionRequest(
+                peer=message.chat_id,
+                msg_id=message.id,
+                reaction=reaction
+            ))
+        except Exception as e:
+            logger.error(f"Ошибка при установке реакции: {str(e)}")
