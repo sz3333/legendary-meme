@@ -3,17 +3,8 @@ from .. import loader, utils
 import logging
 
 logger = logging.getLogger(__name__)
-__version__ = (1, 3, 0)
+__version__ = (1, 4, 0)
 
-
-#░█░█░█▀▀░█▀█░█▀▀░▀█▀░█▀▄░█▀▀
-#░▄▀▄░█▀▀░█░█░▀▀█░░█░░█░█░█▀▀
-#░▀░▀░▀▀▀░▀░▀░▀▀▀░▀▀▀░▀▀░░▀▀▀
-
-# 🔒 Licensed under the AGPL-3.0
-# 🥱 Im not allowing to edit this module.
-# 🌐 https://www.gnu.org/licenses/agpl-3.0.html
-# meta developer: @XenSideMOD
 
 @loader.tds
 class AutoReactMod(loader.Module):
@@ -23,7 +14,8 @@ class AutoReactMod(loader.Module):
         "disabled": "🚫 Автореакции выключены в текущем чате",
         "reaction_set": "✅ Установлена реакция: {}",
         "no_reaction": "⚠️ Укажите эмодзи или его ID для реакции",
-        "premium_set": "✅ Установлена Premium реакция по ID: {}"
+        "premium_set": "✅ Установлена Premium реакция по ID: {}",
+        "trigger_set": "✅ Установлено триггерное слово: {}"
     }
 
     def __init__(self):
@@ -34,7 +26,11 @@ class AutoReactMod(loader.Module):
             
             "is_premium",
             False,
-            "Является ли реакция Premium эмодзи"
+            "Является ли реакция Premium эмодзи",
+            
+            "trigger_word",
+            "",
+            "Слово-триггер для автореакции (оставьте пустым для всех сообщений)"
         )
 
     async def client_ready(self, client, db):
@@ -60,13 +56,12 @@ class AutoReactMod(loader.Module):
             status = True
             
         self.save_active_chats()
-        
         await utils.answer(
             message,
             self.strings["enabled"] if status else self.strings["disabled"]
         )
 
-    @loader.command(ru_doc="Установить реакцию (обычный эмодзи или ID для Premium)")
+    @loader.command(ru_doc="Установить реакцию (эмодзи или ID для Premium)")
     async def setr(self, message):
         args = utils.get_args_raw(message)
         if not args:
@@ -74,7 +69,6 @@ class AutoReactMod(loader.Module):
             return
 
         is_premium = args.isdigit()
-        
         self.config["current_reaction"] = args
         self.config["is_premium"] = is_premium
         
@@ -83,15 +77,26 @@ class AutoReactMod(loader.Module):
             self.strings["premium_set"].format(args) if is_premium else self.strings["reaction_set"].format(args)
         )
 
+    @loader.command(ru_doc="Установить слово-триггер для автореакций")
+    async def settrigger(self, message):
+        args = utils.get_args_raw(message)
+        self.config["trigger_word"] = args
+        await utils.answer(message, self.strings["trigger_set"].format(args or "нет"))
+
     @loader.watcher()
     async def watcher(self, message):
         if not isinstance(message, types.Message):
             return
-            
-        chat_id = str(message.chat_id)
         
+        chat_id = str(message.chat_id)
         if chat_id not in self.active_chats:
             return
+
+        text = getattr(message, "text", "") or ""
+        trigger = self.config.get("trigger_word", "").lower()
+        
+        if trigger and trigger not in text.lower():
+            return  # триггер установлен, но слово не найдено — выходим
 
         try:
             if self.config["is_premium"]:
