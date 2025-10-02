@@ -19,9 +19,9 @@ EOL
 apt update -y
 apt modernize-sources -y
 
-# --- 4. Минимальные пакеты для сборки Python ---
+# --- 4. Минимальные пакеты для сборки Python (только wget и tar) ---
 echo "🔧 Устанавливаем минимальные пакеты для сборки..."
-apt install -y build-essential wget tar
+apt install -y wget tar
 
 # --- 5. Скачиваем и собираем Python 3.10 ---
 PYTHON_VER=3.10.14
@@ -38,14 +38,13 @@ make altinstall  # altinstall, чтобы не трогать системный
 cd ..
 rm -rf Python-$PYTHON_VER Python-$PYTHON_VER.tgz
 
-# --- 6. Настраиваем update-alternatives ---
-echo "🛠 Настраиваем update-alternatives для python3..."
-update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1
+# --- 6. Настраиваем python3 по умолчанию на python3.10 ---
+echo "🛠 Переключаем python3 на python3.10 по умолчанию..."
 update-alternatives --install /usr/bin/python3 python3 /usr/local/bin/python3.10 2
+update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1
+update-alternatives --set python3 /usr/local/bin/python3.10
 
 # --- 7. Финальные сообщения ---
-echo "✅ Python 3.10 успешно установлен!"
-echo "Доступные версии python3:"
-update-alternatives --config python3 || true
-echo "Текущая версия python3 по умолчанию: $(python3 --version)"
+echo "✅ Python 3.10 успешно установлен и установлен по умолчанию для python3!"
+echo "Версия python3: $(python3 --version)"
 echo "Команда python3.10 тоже доступна: $(python3.10 --version)"
